@@ -65,14 +65,22 @@ if ticker:
         # Predict future prices for the next 10 days
         future_dates = [end_date + timedelta(days=i) for i in range(1, 11)]
         future_data = pd.DataFrame(index=future_dates, columns=['Close', 'Volume'])
+        
+        # Initialize future_data with the last known values
         last_row = data[['Close', 'Volume']].iloc[-1:]
-        future_data.loc[:, 'Close'] = np.nan
         future_data.loc[:, 'Volume'] = last_row['Volume'].values
+        future_data.loc[:, 'Close'] = np.nan
 
-        for i in range(10):
-            future_data.iloc[i, 0] = model.predict(future_data.iloc[i:i+1, :])[0]
-            if i < 9:  # Predict next day's volume
-                future_data.iloc[i+1, 1] = future_data.iloc[i, 1]  # Propagate last volume
+        # Iteratively predict future prices
+        for i in range(len(future_dates)):
+            if i == 0:
+                # For the first day, use the last known volume
+                future_data.iloc[i, 0] = model.predict(future_data.iloc[i:i+1, :])[0]
+            else:
+                # For subsequent days, use the predicted price of the previous day
+                future_data.iloc[i, 0] = model.predict(future_data.iloc[i:i+1, :])[0]
+                # Assume volume remains the same (you can improve this by forecasting volume as well)
+                future_data.iloc[i, 1] = future_data.iloc[i-1, 1]
 
         st.write(f'Predicted Prices for the Next 10 Days:')
         st.write(future_data)
