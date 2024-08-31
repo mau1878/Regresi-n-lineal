@@ -41,56 +41,71 @@ if ticker:
         y = data['Close'].shift(-1).dropna()  # Target variable: next day's close price
         X = X[:-1]  # Align X and y
 
-        # Train-Test Split
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=0)
+        if X.empty or y.empty:
+            st.write("Not enough data to train the model.")
+        else:
+            # Train-Test Split
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=0)
 
-        # Model Training
-        model = LinearRegression()
-        model.fit(X_train, y_train)
+            # Model Training
+            model = LinearRegression()
+            model.fit(X_train, y_train)
 
-        # Prediction
-        y_pred = model.predict(X_test)
-        mse = mean_squared_error(y_test, y_pred)
-        st.write(f'Mean Squared Error: {mse:.2f}')
+            # Prediction
+            y_pred = model.predict(X_test)
+            mse = mean_squared_error(y_test, y_pred)
+            st.write(f'Mean Squared Error: {mse:.2f}')
 
-        # Plot results
-        plt.figure(figsize=(10, 5))
-        plt.scatter(y_test, y_pred, color='blue', alpha=0.5)
-        plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], color='red', linestyle='--')
-        plt.xlabel('True Values')
-        plt.ylabel('Predictions')
-        plt.title('True vs Predicted Stock Prices')
-        st.pyplot(plt)
+            # Plot results
+            plt.figure(figsize=(10, 5))
+            plt.scatter(y_test, y_pred, color='blue', alpha=0.5)
+            plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], color='red', linestyle='--')
+            plt.xlabel('True Values')
+            plt.ylabel('Predictions')
+            plt.title('True vs Predicted Stock Prices')
+            st.pyplot(plt)
 
-        # Predict future prices for the next 10 days
-        future_dates = [end_date + timedelta(days=i) for i in range(1, 11)]
-        future_data = pd.DataFrame(index=future_dates, columns=['Close', 'Volume'])
-        
-        # Initialize future_data with the last known values
-        last_row = data[['Close', 'Volume']].iloc[-1:]
-        future_data.loc[:, 'Volume'] = last_row['Volume'].values
+            # Predict future prices for the next 10 days
+            future_dates = [end_date + timedelta(days=i) for i in range(1, 11)]
+            future_data = pd.DataFrame(index=future_dates, columns=['Close', 'Volume'])
 
-        # Initialize the first prediction
-        future_data.loc[future_dates[0], 'Close'] = model.predict([last_row.values.flatten()])[0]
+            # Initialize future_data with the last known values
+            last_row = data[['Close', 'Volume']].iloc[-1:]
+            future_data.loc[:, 'Volume'] = last_row['Volume'].values
 
-        # Iteratively predict future prices
-        for i in range(1, len(future_dates)):
-            # Use the previous day's prediction for future value
-            previous_close = future_data.loc[future_dates[i - 1], 'Close']
-            future_data.loc[future_dates[i], 'Close'] = model.predict([[previous_close, future_data.loc[future_dates[i - 1], 'Volume']]])[0]
+            # Initialize the first prediction
+            future_data.loc[future_dates[0], 'Close'] = model.predict([last_row.values.flatten()])[0]
 
-            # Assuming volume remains constant (you can extend this by predicting volume as well)
-            future_data.loc[future_dates[i], 'Volume'] = future_data.loc[future_dates[i - 1], 'Volume']
+            # Iteratively predict future prices
+            for i in range(1, len(future_dates)):
+                # Prepare input data for prediction
+                previous_close = future_data.loc[future_dates[i - 1], 'Close']
+                previous_volume = future_data.loc[future_dates[i - 1], 'Volume']
+                
+                # Check for NaN values and handle them
+                if pd.isna(previous_close) or pd.isna(previous_volume):
+                    st.write(f"Prediction error: NaN values encountered at index {i}.")
+                    continue
 
-        st.write(f'Predicted Prices for the Next 10 Days:')
-        st.write(future_data)
+                # Predict the next day's close price
+                try:
+                    future_data.loc[future_dates[i], 'Close'] = model.predict([[previous_close, previous_volume]])[0]
+                except ValueError as e:
+                    st.write(f"Prediction error: {e}")
+                    continue
 
-        # Plot future predictions
-        plt.figure(figsize=(10, 5))
-        plt.plot(future_data.index, future_data['Close'], marker='o', linestyle='-', color='green', label='Predicted Prices')
-        plt.xlabel('Date')
-        plt.ylabel('Price')
-        plt.title('Predicted Stock Prices for the Next 10 Days')
-        plt.legend()
-        plt.grid(True)
-        st.pyplot(plt)
+                # Assuming volume remains constant (you can extend this by predicting volume as well)
+                future_data.loc[future_dates[i], 'Volume'] = previous_volume
+
+            st.write(f'Predicted Prices for the Next 10 Days:')
+            st.write(future_data)
+
+            # Plot future predictions
+            plt.figure(figsize=(10, 5))
+            plt.plot(future_data.index, future_data['Close'], marker='o', linestyle='-', color='green', label='Predicted Prices')
+            plt.xlabel('Date')
+            plt.ylabel('Price')
+            plt.title('Predicted Stock Prices for the Next 10 Days')
+            plt.legend()
+            plt.grid(True)
+            st.pyplot(plt)
