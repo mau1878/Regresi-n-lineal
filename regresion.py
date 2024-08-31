@@ -69,18 +69,18 @@ if ticker:
         # Initialize future_data with the last known values
         last_row = data[['Close', 'Volume']].iloc[-1:]
         future_data.loc[:, 'Volume'] = last_row['Volume'].values
-        future_data.loc[:, 'Close'] = np.nan
+
+        # Initialize the first prediction
+        future_data.loc[future_dates[0], 'Close'] = model.predict([last_row.values.flatten()])[0]
 
         # Iteratively predict future prices
-        for i in range(len(future_dates)):
-            if i == 0:
-                # For the first day, use the last known volume
-                future_data.iloc[i, 0] = model.predict(future_data.iloc[i:i+1, :])[0]
-            else:
-                # For subsequent days, use the predicted price of the previous day
-                future_data.iloc[i, 0] = model.predict(future_data.iloc[i:i+1, :])[0]
-                # Assume volume remains the same (you can improve this by forecasting volume as well)
-                future_data.iloc[i, 1] = future_data.iloc[i-1, 1]
+        for i in range(1, len(future_dates)):
+            # Use the previous day's prediction for future value
+            previous_close = future_data.loc[future_dates[i - 1], 'Close']
+            future_data.loc[future_dates[i], 'Close'] = model.predict([[previous_close, future_data.loc[future_dates[i - 1], 'Volume']]])[0]
+
+            # Assuming volume remains constant (you can extend this by predicting volume as well)
+            future_data.loc[future_dates[i], 'Volume'] = future_data.loc[future_dates[i - 1], 'Volume']
 
         st.write(f'Predicted Prices for the Next 10 Days:')
         st.write(future_data)
