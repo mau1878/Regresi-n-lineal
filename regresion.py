@@ -6,14 +6,17 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
+from datetime import datetime, timedelta
 
 # Streamlit app
 st.title('Stock Price Prediction with Machine Learning')
 
 # User input for stock ticker
 ticker = st.text_input('Enter Stock Ticker:', 'AAPL')
+
+# Set default end date to today and let the user select the start date
+end_date = st.date_input('End Date:', datetime.today())
 start_date = st.date_input('Start Date:', pd.to_datetime('2020-01-01'))
-end_date = st.date_input('End Date:', pd.to_datetime('2023-01-01'))
 
 # Fetch data
 if ticker:
@@ -59,7 +62,27 @@ if ticker:
         plt.title('True vs Predicted Stock Prices')
         st.pyplot(plt)
 
-        # Future Price Prediction
+        # Predict future prices for the next 10 days
+        future_dates = [end_date + timedelta(days=i) for i in range(1, 11)]
+        future_data = pd.DataFrame(index=future_dates, columns=['Close', 'Volume'])
         last_row = data[['Close', 'Volume']].iloc[-1:]
-        future_price = model.predict(last_row)
-        st.write(f'Predicted Next Day Closing Price: ${future_price[0]:.2f}')
+        future_data.loc[:, 'Close'] = np.nan
+        future_data.loc[:, 'Volume'] = last_row['Volume'].values
+
+        for i in range(10):
+            future_data.iloc[i, 0] = model.predict(future_data.iloc[i:i+1, :])[0]
+            if i < 9:  # Predict next day's volume
+                future_data.iloc[i+1, 1] = future_data.iloc[i, 1]  # Propagate last volume
+
+        st.write(f'Predicted Prices for the Next 10 Days:')
+        st.write(future_data)
+
+        # Plot future predictions
+        plt.figure(figsize=(10, 5))
+        plt.plot(future_data.index, future_data['Close'], marker='o', linestyle='-', color='green', label='Predicted Prices')
+        plt.xlabel('Date')
+        plt.ylabel('Price')
+        plt.title('Predicted Stock Prices for the Next 10 Days')
+        plt.legend()
+        plt.grid(True)
+        st.pyplot(plt)
