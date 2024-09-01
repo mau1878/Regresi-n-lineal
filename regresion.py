@@ -84,6 +84,10 @@ plt.plot(train_index, train_predict, label='Train Predictions')
 
 # Test Predictions
 test_index = data.index[len(train_predict) + (time_step * 2):-1]
+
+# Adjust the length of test_predict to match test_index
+test_predict = test_predict[:len(test_index)]
+
 plt.plot(test_index, test_predict, label='Test Predictions')
 
 plt.legend()
