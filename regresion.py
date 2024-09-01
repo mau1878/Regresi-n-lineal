@@ -3,13 +3,14 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, LSTM
+from tensorflow.keras.callbacks import EarlyStopping
 from datetime import datetime, timedelta
 
 # Streamlit app
-st.title('Stock Price Prediction with Machine Learning')
+st.title('Stock Price Prediction with LSTM')
 
 # User input for stock ticker
 ticker = st.text_input('Enter Stock Ticker:', 'AAPL')
@@ -33,79 +34,92 @@ if ticker:
         st.write(f"Data for {ticker} from {start_date} to {end_date}")
         st.write(data.head())
 
-        # Feature Engineering
-        data['Volume'] = data['Volume'].shift(-1)  # Predicting next day's volume
-        data = data.dropna()  # Drop rows with NaN values
+        # Preprocessing
+        data = data[['Close', 'Volume']]
 
-        X = data[['Close', 'Volume']]  # Features
-        y = data['Close'].shift(-1).dropna()  # Target variable: next day's close price
-        X = X[:-1]  # Align X and y
+        # Normalize the data
+        scaler = MinMaxScaler(feature_range=(0, 1))
+        scaled_data = scaler.fit_transform(data)
 
-        if X.empty or y.empty:
-            st.write("Not enough data to train the model.")
-        else:
-            # Train-Test Split
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=0)
+        # Prepare the training data
+        def create_dataset(dataset, time_step=1):
+            X, y = [], []
+            for i in range(len(dataset) - time_step - 1):
+                a = dataset[i:(i + time_step), :]
+                X.append(a)
+                y.append(dataset[i + time_step, 0])  # Predicting the 'Close' price
+            return np.array(X), np.array(y)
 
-            # Model Training
-            model = LinearRegression()
-            model.fit(X_train, y_train)
+        time_step = 60  # Use last 60 days to predict the next day's price
+        X, y = create_dataset(scaled_data, time_step)
 
-            # Prediction
-            y_pred = model.predict(X_test)
-            mse = mean_squared_error(y_test, y_pred)
-            st.write(f'Mean Squared Error: {mse:.2f}')
+        # Reshape input to be [samples, time steps, features]
+        X = X.reshape(X.shape[0], X.shape[1], X.shape[2])
 
-            # Plot results
-            plt.figure(figsize=(10, 5))
-            plt.scatter(y_test, y_pred, color='blue', alpha=0.5)
-            plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], color='red', linestyle='--')
-            plt.xlabel('True Values')
-            plt.ylabel('Predictions')
-            plt.title('True vs Predicted Stock Prices')
-            st.pyplot(plt)
+        # Split data into training and testing sets
+        training_size = int(len(X) * 0.8)
+        X_train, X_test = X[:training_size], X[training_size:]
+        y_train, y_test = y[:training_size], y[training_size:]
 
-            # Predict future prices for the next 10 days
-            future_dates = [end_date + timedelta(days=i) for i in range(1, 11)]
-            future_data = pd.DataFrame(index=future_dates, columns=['Close', 'Volume'])
+        # Build the LSTM model
+        model = Sequential()
+        model.add(LSTM(units=50, return_sequences=True, input_shape=(time_step, X.shape[2])))
+        model.add(LSTM(units=50, return_sequences=False))
+        model.add(Dense(units=25))
+        model.add(Dense(units=1))
 
-            # Initialize future_data with the last known values
-            last_row = data[['Close', 'Volume']].iloc[-1:]
-            future_data.loc[:, 'Volume'] = last_row['Volume'].values
+        model.compile(optimizer='adam', loss='mean_squared_error')
 
-            # Initialize the first prediction
-            future_data.loc[future_dates[0], 'Close'] = model.predict([last_row.values.flatten()])[0]
+        # Early stopping to prevent overfitting
+        early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
-            # Iteratively predict future prices
-            for i in range(1, len(future_dates)):
-                # Prepare input data for prediction
-                previous_close = future_data.loc[future_dates[i - 1], 'Close']
-                previous_volume = future_data.loc[future_dates[i - 1], 'Volume']
-                
-                # Check for NaN values and handle them
-                if pd.isna(previous_close) or pd.isna(previous_volume):
-                    st.write(f"Prediction error: NaN values encountered at index {i}.")
-                    continue
+        # Train the model
+        history = model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=50, batch_size=32, callbacks=[early_stop], verbose=1)
 
-                # Predict the next day's close price
-                try:
-                    future_data.loc[future_dates[i], 'Close'] = model.predict([[previous_close, previous_volume]])[0]
-                except ValueError as e:
-                    st.write(f"Prediction error: {e}")
-                    continue
+        # Prediction
+        train_predict = model.predict(X_train)
+        test_predict = model.predict(X_test)
 
-                # Assuming volume remains constant (you can extend this by predicting volume as well)
-                future_data.loc[future_dates[i], 'Volume'] = previous_volume
+        # Inverse transform the predictions to the original scale
+        train_predict = scaler.inverse_transform(np.concatenate((train_predict, np.zeros((train_predict.shape[0], 1))), axis=1))[:, 0]
+        test_predict = scaler.inverse_transform(np.concatenate((test_predict, np.zeros((test_predict.shape[0], 1))), axis=1))[:, 0]
 
-            st.write(f'Predicted Prices for the Next 10 Days:')
-            st.write(future_data)
+        # Plotting
+        plt.figure(figsize=(10, 5))
+        plt.plot(data.index, data['Close'], label='Actual Prices')
+        plt.plot(data.index[time_step:len(train_predict)+time_step], train_predict, label='Train Predictions')
+        plt.plot(data.index[len(train_predict)+(time_step*2):len(data)-1], test_predict, label='Test Predictions')
+        plt.legend()
+        plt.title('LSTM Model - Actual vs Predicted Stock Prices')
+        plt.xlabel('Date')
+        plt.ylabel('Price')
+        st.pyplot(plt)
 
-            # Plot future predictions
-            plt.figure(figsize=(10, 5))
-            plt.plot(future_data.index, future_data['Close'], marker='o', linestyle='-', color='green', label='Predicted Prices')
-            plt.xlabel('Date')
-            plt.ylabel('Price')
-            plt.title('Predicted Stock Prices for the Next 10 Days')
-            plt.legend()
-            plt.grid(True)
-            st.pyplot(plt)
+        # Predict future prices for the next 10 days
+        future_input = scaled_data[-time_step:]
+        future_input = future_input.reshape(1, time_step, 2)
+        
+        future_predictions = []
+        for i in range(10):
+            future_pred = model.predict(future_input)
+            future_predictions.append(future_pred[0, 0])
+            future_input = np.append(future_input[:, 1:, :], [[future_pred, future_input[:, -1, 1]]], axis=1)
+
+        future_predictions = scaler.inverse_transform(np.concatenate((np.array(future_predictions).reshape(-1, 1), np.zeros((10, 1))), axis=1))[:, 0]
+
+        future_dates = [end_date + timedelta(days=i) for i in range(1, 11)]
+        future_df = pd.DataFrame({'Date': future_dates, 'Predicted Close': future_predictions})
+        future_df.set_index('Date', inplace=True)
+
+        st.write(f'Predicted Prices for the Next 10 Days:')
+        st.write(future_df)
+
+        # Plot future predictions
+        plt.figure(figsize=(10, 5))
+        plt.plot(future_df.index, future_df['Predicted Close'], marker='o', linestyle='-', color='green', label='Predicted Prices')
+        plt.xlabel('Date')
+        plt.ylabel('Price')
+        plt.title('Predicted Stock Prices for the Next 10 Days')
+        plt.legend()
+        plt.grid(True)
+        st.pyplot(plt)
