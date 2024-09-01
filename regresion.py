@@ -5,6 +5,7 @@ import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, LSTM
+from tensorflow.keras.callbacks import EarlyStopping
 import matplotlib.pyplot as plt
 
 st.title('Stock Price Prediction using LSTM')
@@ -14,11 +15,17 @@ ticker = st.text_input('Enter Stock Ticker:', 'AAPL')
 start_date = st.date_input('Start Date', pd.to_datetime('2015-01-01'))
 end_date = st.date_input('End Date', pd.to_datetime('today'))
 
-# Load stock data
-data = yf.download(ticker, start=start_date, end=end_date)
-st.write(f"Loaded {len(data)} rows of data for {ticker}.")
+# Load stock data with error handling
+try:
+    data = yf.download(ticker, start=start_date, end=end_date)
+    if data.empty:
+        st.error(f"No data found for {ticker} from {start_date} to {end_date}. Please check the ticker symbol and date range.")
+        st.stop()
+except Exception as e:
+    st.error(f"Error downloading data: {e}")
+    st.stop()
 
-# Display the last few rows of the data
+st.write(f"Loaded {len(data)} rows of data for {ticker}.")
 st.write(data.tail())
 
 # Feature selection: using 'Close' and 'Volume' to predict 'Close'
@@ -28,7 +35,7 @@ data = data[['Close', 'Volume']]
 scaler = MinMaxScaler(feature_range=(0, 1))
 scaled_data = scaler.fit_transform(data)
 
-# Create a function to prepare the dataset for LSTM
+# Function to prepare the dataset for LSTM
 def create_dataset(dataset, time_step=1):
     X, Y = [], []
     for i in range(len(dataset) - time_step - 1):
@@ -36,10 +43,15 @@ def create_dataset(dataset, time_step=1):
         Y.append(dataset[i + time_step, 0])
     return np.array(X), np.array(Y)
 
-# Hyperparameters
-time_step = 60  # 60 days of historical data to predict the next day
+# User-adjustable time_step parameter
+time_step = st.slider('Select Time Step (number of days):', min_value=30, max_value=120, value=60)
 
-# Preparing the training and test datasets
+# Check for enough data
+if len(data) < time_step + 1:
+    st.error(f"Not enough data to train the model with a time step of {time_step} days.")
+    st.stop()
+
+# Prepare training and test datasets
 train_size = int(len(scaled_data) * 0.8)
 train_data = scaled_data[:train_size, :]
 test_data = scaled_data[train_size:, :]
@@ -47,11 +59,10 @@ test_data = scaled_data[train_size:, :]
 X_train, y_train = create_dataset(train_data, time_step)
 X_test, y_test = create_dataset(test_data, time_step)
 
-# Reshape the input to be [samples, time steps, features] which is required for LSTM
 X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], X_train.shape[2])
 X_test = X_test.reshape(X_test.shape[0], X_test.shape[1], X_test.shape[2])
 
-# Build the LSTM model
+# Build LSTM model
 model = Sequential()
 model.add(LSTM(50, return_sequences=True, input_shape=(time_step, 2)))
 model.add(LSTM(50, return_sequences=False))
@@ -61,68 +72,72 @@ model.add(Dense(1))
 # Compile the model
 model.compile(optimizer='adam', loss='mean_squared_error')
 
-# Train the model
-model.fit(X_train, y_train, batch_size=64, epochs=10, verbose=1)
+# Early stopping callback
+early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
-# Predicting the stock prices
+# Train the model
+history = model.fit(X_train, y_train, batch_size=64, epochs=50, verbose=1, validation_split=0.1, callbacks=[early_stop])
+
+# Display model summary and training loss
+st.subheader('Model Architecture')
+st.text(model.summary())
+
+st.subheader('Training Loss')
+st.line_chart(history.history['loss'])
+st.line_chart(history.history['val_loss'])
+
+# Predicting stock prices
 train_predict = model.predict(X_train)
 test_predict = model.predict(X_test)
 
-# Inverse transform to get actual prices
 train_predict = scaler.inverse_transform(np.concatenate((train_predict, np.zeros((train_predict.shape[0], 1))), axis=1))[:, 0]
 test_predict = scaler.inverse_transform(np.concatenate((test_predict, np.zeros((test_predict.shape[0], 1))), axis=1))[:, 0]
 
-# Plotting
+# Plotting actual vs predicted prices
 plt.figure(figsize=(12, 6))
-
-# Actual Prices
 plt.plot(data.index, data['Close'], label='Actual Prices')
 
-# Train Predictions
 train_index = data.index[time_step:len(train_predict) + time_step]
 plt.plot(train_index, train_predict, label='Train Predictions')
 
-# Test Predictions
 test_index = data.index[len(train_predict) + (time_step * 2):-1]
 
-# Ensure the lengths of test_index and test_predict are the same
 min_length = min(len(test_index), len(test_predict))
 test_index = test_index[:min_length]
 test_predict = test_predict[:min_length]
 
-# Plot Test Predictions
 plt.plot(test_index, test_predict, label='Test Predictions')
 
 plt.legend()
-plt.title('LSTM Model - Actual vs Predicted Stock Prices')
+plt.title(f'{ticker} Stock Prices: Actual vs Predicted')
 plt.xlabel('Date')
-plt.ylabel('Price')
+plt.ylabel('Price (USD)')
 st.pyplot(plt)
 
-# Predict future prices for the next 10 days
-n_future_days = 10
+# Predicting future prices for the next n days
+n_future_days = st.slider('Select Number of Days to Predict into the Future:', min_value=1, max_value=30, value=10)
+
 last_data = scaled_data[-time_step:]
 future_predictions = []
 
 for _ in range(n_future_days):
-    pred = model.predict(last_data.reshape(1, time_step, 2))[0, 0]
+    pred = model.predict(last_data.reshape(1, time_step, 2), verbose=0)[0, 0]
     future_predictions.append(pred)
     last_data = np.append(last_data[1:], [[pred, last_data[-1, 1]]], axis=0)
 
-# Inverse transform future predictions
 future_predictions = scaler.inverse_transform(np.concatenate((np.array(future_predictions).reshape(-1, 1), np.zeros((n_future_days, 1))), axis=1))[:, 0]
 
 # Display future predictions
 future_dates = pd.date_range(start=data.index[-1] + pd.Timedelta(days=1), periods=n_future_days, freq='B')
-future_df = pd.DataFrame({'Date': future_dates, 'Predicted Close': future_predictions})
-st.write("Future 10-Day Predictions:")
+future_df = pd.DataFrame({'Date': future_dates, 'Predicted Close Price': future_predictions})
+
+st.subheader(f'{ticker} Predicted Close Prices for the Next {n_future_days} Days')
 st.write(future_df)
 
-# Plot future predictions
-plt.figure(figsize=(10, 5))
-plt.plot(future_df['Date'], future_df['Predicted Close'], marker='o', label='Future Predictions')
+plt.figure(figsize=(12, 6))
+plt.plot(future_df['Date'], future_df['Predicted Close Price'], label='Future Predictions', color='orange')
 plt.legend()
-plt.title('LSTM Model - Future 10-Day Stock Price Predictions')
+plt.title(f'{ticker} Future Stock Price Predictions')
 plt.xlabel('Date')
-plt.ylabel('Predicted Price')
+plt.ylabel('Predicted Price (USD)')
 st.pyplot(plt)
