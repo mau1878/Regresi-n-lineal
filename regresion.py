@@ -85,9 +85,12 @@ plt.plot(train_index, train_predict, label='Train Predictions')
 # Test Predictions
 test_index = data.index[len(train_predict) + (time_step * 2):-1]
 
-# Adjust the length of test_predict to match test_index
-test_predict = test_predict[:len(test_index)]
+# Ensure the lengths of test_index and test_predict are the same
+min_length = min(len(test_index), len(test_predict))
+test_index = test_index[:min_length]
+test_predict = test_predict[:min_length]
 
+# Plot Test Predictions
 plt.plot(test_index, test_predict, label='Test Predictions')
 
 plt.legend()
@@ -114,11 +117,6 @@ future_dates = pd.date_range(start=data.index[-1] + pd.Timedelta(days=1), period
 future_df = pd.DataFrame({'Date': future_dates, 'Predicted Close': future_predictions})
 st.write("Future 10-Day Predictions:")
 st.write(future_df)
-
-# Ensure the lengths of test_index and test_predict are the same
-min_length = min(len(test_index), len(test_predict))
-test_index = test_index[:min_length]
-test_predict = test_predict[:min_length]
 
 # Plot future predictions
 plt.figure(figsize=(10, 5))
