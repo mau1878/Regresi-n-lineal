@@ -59,6 +59,11 @@ test_data = scaled_data[train_size:, :]
 X_train, y_train = create_dataset(train_data, time_step)
 X_test, y_test = create_dataset(test_data, time_step)
 
+# Ensure the data is properly shaped and not empty
+if X_train.size == 0 or X_test.size == 0:
+    st.error("Training or testing data is empty after reshaping. Please check the time step and the amount of data available.")
+    st.stop()
+
 X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], X_train.shape[2])
 X_test = X_test.reshape(X_test.shape[0], X_test.shape[1], X_test.shape[2])
 
@@ -72,11 +77,16 @@ model.add(Dense(1))
 # Compile the model
 model.compile(optimizer='adam', loss='mean_squared_error')
 
-# Early stopping callback
+# Early stopping callback with validation
 early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
-# Train the model
+# Train the model with validation split
 history = model.fit(X_train, y_train, batch_size=64, epochs=50, verbose=1, validation_split=0.1, callbacks=[early_stop])
+
+# Check if training history is None (which should not happen with the current setup)
+if history is None:
+    st.error("Model training failed. Please review the data and model parameters.")
+    st.stop()
 
 # Display model summary and training loss
 st.subheader('Model Architecture')
@@ -90,6 +100,7 @@ st.line_chart(history.history['val_loss'])
 train_predict = model.predict(X_train)
 test_predict = model.predict(X_test)
 
+# Inverse scaling
 train_predict = scaler.inverse_transform(np.concatenate((train_predict, np.zeros((train_predict.shape[0], 1))), axis=1))[:, 0]
 test_predict = scaler.inverse_transform(np.concatenate((test_predict, np.zeros((test_predict.shape[0], 1))), axis=1))[:, 0]
 
@@ -100,8 +111,8 @@ plt.plot(data.index, data['Close'], label='Actual Prices')
 train_index = data.index[time_step:len(train_predict) + time_step]
 plt.plot(train_index, train_predict, label='Train Predictions')
 
+# Adjust test_index and test_predict lengths to avoid mismatch
 test_index = data.index[len(train_predict) + (time_step * 2):-1]
-
 min_length = min(len(test_index), len(test_predict))
 test_index = test_index[:min_length]
 test_predict = test_predict[:min_length]
@@ -125,6 +136,7 @@ for _ in range(n_future_days):
     future_predictions.append(pred)
     last_data = np.append(last_data[1:], [[pred, last_data[-1, 1]]], axis=0)
 
+# Inverse scaling for future predictions
 future_predictions = scaler.inverse_transform(np.concatenate((np.array(future_predictions).reshape(-1, 1), np.zeros((n_future_days, 1))), axis=1))[:, 0]
 
 # Display future predictions
