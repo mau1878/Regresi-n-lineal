@@ -21,12 +21,14 @@ try:
     if data.empty:
         st.error(f"No data found for {ticker} from {start_date} to {end_date}. Please check the ticker symbol and date range.")
         st.stop()
+        
+    # Flatten the multi-level columns and remove ticker from column names
+    data.columns = [col[0] if col[0] != 'Date' else 'Date' for col in data.columns]
+    
 except Exception as e:
     st.error(f"Error downloading data: {e}")
     st.stop()
 
-# Flattening the multi-level columns and renaming them
-data.columns = [col[1] for col in data.columns]
 st.write(f"Loaded {len(data)} rows of data for {ticker}.")
 st.write(data.tail())
 
@@ -85,18 +87,24 @@ early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=
 # Train the model with validation split
 history = model.fit(X_train, y_train, batch_size=64, epochs=50, verbose=1, validation_split=0.1, callbacks=[early_stop])
 
-# Check if training history is None (which should not happen with the current setup)
+# Check if training history is None
 if history is None:
     st.error("Model training failed. Please review the data and model parameters.")
     st.stop()
 
 # Display model summary and training loss
 st.subheader('Model Architecture')
-st.text(model.summary())
+model_summary = []
+model.summary(print_fn=lambda x: model_summary.append(x))
+st.text('\n'.join(model_summary))
 
 st.subheader('Training Loss')
-st.line_chart(history.history['loss'])
-st.line_chart(history.history['val_loss'])
+fig_loss, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+ax1.plot(history.history['loss'])
+ax1.set_title('Training Loss')
+ax2.plot(history.history['val_loss'])
+ax2.set_title('Validation Loss')
+st.pyplot(fig_loss)
 
 # Predicting stock prices
 train_predict = model.predict(X_train)
@@ -107,7 +115,7 @@ train_predict = scaler.inverse_transform(np.concatenate((train_predict, np.zeros
 test_predict = scaler.inverse_transform(np.concatenate((test_predict, np.zeros((test_predict.shape[0], 1))), axis=1))[:, 0]
 
 # Plotting actual vs predicted prices
-plt.figure(figsize=(12, 6))
+fig_pred = plt.figure(figsize=(12, 6))
 plt.plot(data.index, data['Close'], label='Actual Prices')
 
 train_index = data.index[time_step:len(train_predict) + time_step]
@@ -120,12 +128,11 @@ test_index = test_index[:min_length]
 test_predict = test_predict[:min_length]
 
 plt.plot(test_index, test_predict, label='Test Predictions')
-
 plt.legend()
 plt.title(f'{ticker} Stock Prices: Actual vs Predicted')
 plt.xlabel('Date')
 plt.ylabel('Price (USD)')
-st.pyplot(plt)
+st.pyplot(fig_pred)
 
 # Predicting future prices for the next n days
 n_future_days = st.slider('Select Number of Days to Predict into the Future:', min_value=1, max_value=30, value=10)
@@ -148,10 +155,11 @@ future_df = pd.DataFrame({'Date': future_dates, 'Predicted Close Price': future_
 st.subheader(f'{ticker} Predicted Close Prices for the Next {n_future_days} Days')
 st.write(future_df)
 
-plt.figure(figsize=(12, 6))
+# Plot future predictions
+fig_future = plt.figure(figsize=(12, 6))
 plt.plot(future_df['Date'], future_df['Predicted Close Price'], label='Future Predictions', color='orange')
 plt.legend()
 plt.title(f'{ticker} Future Stock Price Predictions')
 plt.xlabel('Date')
 plt.ylabel('Predicted Price (USD)')
-st.pyplot(plt)
+st.pyplot(fig_future)
