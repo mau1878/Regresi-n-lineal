@@ -25,8 +25,9 @@ except Exception as e:
     st.error(f"Error downloading data: {e}")
     st.stop()
 
-# Flatten the multi-level columns
+# Flatten the multi-level columns, avoiding duplicates
 data.columns = data.columns.map(lambda x: x[1] if isinstance(x, tuple) else x)
+data = data.loc[:, ~data.columns.duplicated()]  # Remove duplicate columns
 
 st.write(f"Loaded {len(data)} rows of data for {ticker}.")
 st.write(data.tail())
